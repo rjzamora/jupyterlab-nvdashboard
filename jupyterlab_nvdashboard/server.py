@@ -12,6 +12,7 @@ routes = {
     "/GPU-Memory": apps.gpu.gpu_mem,
     "/GPU-Resources": apps.gpu.gpu_resource_timeline,
     "/PCI-Throughput": apps.gpu.pci,
+    "/NvLink": apps.gpu.nvlink,
     # "/CPU-Utilization": apps.cpu.cpu,
     "/Machine-Resources": apps.cpu.resource_timeline,
 }

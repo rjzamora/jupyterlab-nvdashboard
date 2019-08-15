@@ -6,6 +6,7 @@ from bokeh.palettes import all_palettes
 
 import math
 import time
+import os
 
 import pynvml
 
@@ -113,7 +114,7 @@ def pci(doc):
         pynvml.nvmlDeviceGetPcieThroughput(
             gpu_handles[i], pynvml.NVML_PCIE_UTIL_TX_BYTES
         )
-        / (1024.0 * 1024.0) # Convert KB/s -> GB/s
+        / (1024.0 * 1024.0)  # Convert KB/s -> GB/s
         for i in range(ngpus)
     ]
     left = list(range(len(pci_tx)))
@@ -139,7 +140,7 @@ def pci(doc):
         pynvml.nvmlDeviceGetPcieThroughput(
             gpu_handles[i], pynvml.NVML_PCIE_UTIL_RX_BYTES
         )
-        / (1024.0 * 1024.0) # Convert KB/s -> GB/s
+        / (1024.0 * 1024.0)  # Convert KB/s -> GB/s
         for i in range(ngpus)
     ]
     left = list(range(len(pci_rx)))
@@ -167,19 +168,129 @@ def pci(doc):
             pynvml.nvmlDeviceGetPcieThroughput(
                 gpu_handles[i], pynvml.NVML_PCIE_UTIL_TX_BYTES
             )
-            / (1024.0 * 1024.0) # Convert KB/s -> GB/s
+            / (1024.0 * 1024.0)  # Convert KB/s -> GB/s
             for i in range(ngpus)
         ]
         src_dict["pci-rx"] = [
             pynvml.nvmlDeviceGetPcieThroughput(
                 gpu_handles[i], pynvml.NVML_PCIE_UTIL_RX_BYTES
             )
-            / (1024.0 * 1024.0) # Convert KB/s -> GB/s
+            / (1024.0 * 1024.0)  # Convert KB/s -> GB/s
             for i in range(ngpus)
         ]
         source.data.update(src_dict)
 
     doc.add_periodic_callback(cb, 200)
+
+
+def nvlink(doc):
+
+    max_bw = 1024.0 * 1024.0 * 1024.0
+    nlinks = pynvml.NVML_NVLINK_MAX_LINKS
+    counter = 1
+    # nvmlDeviceSetNvLinkUtilizationControl seems limited, using smi:
+    os.system(
+        "nvidia-smi nvlink --setcontrol " + str(counter) + "bz"
+    )  # Get output in bytes
+
+    tx_fig = figure(title="TX NVLink Bandwidth", sizing_mode="stretch_both")
+    tx_fig.yaxis.formatter = NumeralTickFormatter(format="0.0b")
+    nvlink_state = {}
+    nvlink_state["tx"] = [
+        sum(
+            [
+                pynvml.nvmlDeviceGetNvLinkUtilizationCounter(
+                    gpu_handles[i], j, counter
+                )["tx"]
+                for j in range(nlinks)
+            ]
+        )
+        for i in range(ngpus)
+    ]
+    nvlink_state["tx-ref"] = nvlink_state["tx"].copy()
+    left = list(range(ngpus))
+    right = [l + 0.8 for l in left]
+    source = ColumnDataSource(
+        {
+            "left": left,
+            "right": right,
+            "count-tx": [0.0 for i in range(ngpus)],
+            "count-rx": [0.0 for i in range(ngpus)],
+        }
+    )
+    mapper = LinearColorMapper(palette=all_palettes["RdYlBu"][4], low=0, high=max_bw)
+
+    tx_fig.quad(
+        source=source,
+        left="left",
+        right="right",
+        bottom=0,
+        top="count-tx",
+        color={"field": "count-tx", "transform": mapper},
+    )
+
+    rx_fig = figure(title="RX NVLink Bandwidth", sizing_mode="stretch_both")
+    rx_fig.yaxis.formatter = NumeralTickFormatter(format="0.0b")
+    nvlink_state["rx"] = [
+        sum(
+            [
+                pynvml.nvmlDeviceGetNvLinkUtilizationCounter(
+                    gpu_handles[i], j, counter
+                )["rx"]
+                for j in range(nlinks)
+            ]
+        )
+        for i in range(ngpus)
+    ]
+    nvlink_state["rx-ref"] = nvlink_state["rx"].copy()
+
+    rx_fig.quad(
+        source=source,
+        left="left",
+        right="right",
+        bottom=0,
+        top="count-rx",
+        color={"field": "count-rx", "transform": mapper},
+    )
+
+    doc.title = "NVLink Utilization Counters"
+    doc.add_root(column(tx_fig, rx_fig, sizing_mode="stretch_both"))
+
+    def cb():
+        nvlink_state["tx-ref"] = nvlink_state["tx"].copy()
+        nvlink_state["rx-ref"] = nvlink_state["rx"].copy()
+        src_dict = {}
+        nvlink_state["tx"] = [
+            sum(
+                [
+                    pynvml.nvmlDeviceGetNvLinkUtilizationCounter(
+                        gpu_handles[i], j, counter
+                    )["tx"]
+                    for j in range(nlinks)
+                ]
+            )
+            for i in range(ngpus)
+        ]
+        nvlink_state["rx"] = [
+            sum(
+                [
+                    pynvml.nvmlDeviceGetNvLinkUtilizationCounter(
+                        gpu_handles[i], j, counter
+                    )["rx"]
+                    for j in range(nlinks)
+                ]
+            )
+            for i in range(ngpus)
+        ]
+        src_dict["count-tx"] = [
+            (a - b) * 2.0 for (a, b) in zip(nvlink_state["tx"], nvlink_state["tx-ref"])
+        ]
+        src_dict["count-rx"] = [
+            (a - b) * 2.0 for (a, b) in zip(nvlink_state["rx"], nvlink_state["rx-ref"])
+        ]
+        source.data.update(src_dict)
+
+    doc.add_periodic_callback(cb, 500)
 
 
 def gpu_resource_timeline(doc):
